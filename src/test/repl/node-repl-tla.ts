@@ -1,20 +1,16 @@
-import { expect } from 'chai';
+import { expect } from '../testlib';
 import type { Key } from 'readline';
 import { Stream } from 'stream';
 import semver = require('semver');
 import { ts } from '../helpers';
-import type { ContextWithTsNodeUnderTest } from './helpers';
-import { nodeSupportsEsmHooks } from '../helpers';
+import type { ctxTsNode } from '../helpers';
 
-interface SharedObjects extends ContextWithTsNodeUnderTest {
+interface SharedObjects extends ctxTsNode.Ctx {
   TEST_DIR: string;
 }
 
 // Based on https://github.com/nodejs/node/blob/88799930794045795e8abac874730f9eba7e2300/test/parallel/test-repl-top-level-await.js
-export async function upstreamTopLevelAwaitTests({
-  TEST_DIR,
-  tsNodeUnderTest,
-}: SharedObjects) {
+export async function upstreamTopLevelAwaitTests({ TEST_DIR, tsNodeUnderTest }: SharedObjects) {
   const PROMPT = 'await repl > ';
 
   const putIn = new REPLStream();
@@ -32,11 +28,7 @@ export async function upstreamTopLevelAwaitTests({
     experimentalReplAwait: true,
     transpileOnly: true,
     compilerOptions: {
-      target: semver.gte(ts.version, '3.0.1')
-        ? 'es2018'
-        : // TS 2.7 is using polyfill for async interator even though they
-          // were added in es2018
-          'esnext',
+      target: 'es2018',
     },
   });
   replService.setService(service);
@@ -64,10 +56,7 @@ export async function upstreamTopLevelAwaitTests({
     return promise;
   }
 
-  await runAndWait([
-    'function foo(x) { return x; }',
-    'function koo() { return Promise.resolve(4); }',
-  ]);
+  await runAndWait(['function foo(x) { return x; }', 'function koo() { return Promise.resolve(4); }']);
 
   const testCases = [
     ['await Promise.resolve(0)', '0'],
@@ -103,10 +92,7 @@ export async function upstreamTopLevelAwaitTests({
     //   ['const n = foo(await\r', '... koo());\r', 'undefined'],
     // ],
 
-    [
-      '`status: ${(await Promise.resolve({ status: 200 })).status}`',
-      "'status: 200'",
-    ],
+    ['`status: ${(await Promise.resolve({ status: 200 })).status}`', "'status: 200'"],
     ['for (let i = 0; i < 2; ++i) await i'],
     ['for (let i = 0; i < 2; ++i) { await i }'],
     ['await 0', '0'],
@@ -114,26 +100,17 @@ export async function upstreamTopLevelAwaitTests({
     ['foo', '[Function: foo]'],
     ['class Foo {}; await 1;', '1'],
 
-    [
-      'Foo',
-      // Adjusted since ts-node supports older versions of node
-      semver.gte(process.version, '12.18.0')
-        ? '[class Foo]'
-        : '[Function: Foo]',
-    ],
+    ['Foo', '[class Foo]'],
     ['if (await true) { function fooz() {}; }'],
     ['fooz', '[Function: fooz]'],
     ['if (await true) { class Bar {}; }'],
 
     [
       'Bar',
-      // Adjusted since ts-node supports older versions of node
-      nodeSupportsEsmHooks
-        ? 'Uncaught ReferenceError: Bar is not defined'
-        : 'ReferenceError: Bar is not defined',
+      'Uncaught ReferenceError: Bar is not defined',
       // Line increased due to TS added lines
       {
-        line: nodeSupportsEsmHooks ? 4 : 5,
+        line: 4,
       },
     ],
 
@@ -144,13 +121,10 @@ export async function upstreamTopLevelAwaitTests({
 
     [
       'j',
-      // Adjusted since ts-node supports older versions of node
-      nodeSupportsEsmHooks
-        ? 'Uncaught ReferenceError: j is not defined'
-        : 'ReferenceError: j is not defined',
+      'Uncaught ReferenceError: j is not defined',
       // Line increased due to TS added lines
       {
-        line: nodeSupportsEsmHooks ? 4 : 5,
+        line: 4,
       },
     ],
 
@@ -158,13 +132,10 @@ export async function upstreamTopLevelAwaitTests({
 
     [
       'return 42; await 5;',
-      // Adjusted since ts-node supports older versions of node
-      nodeSupportsEsmHooks
-        ? 'Uncaught SyntaxError: Illegal return statement'
-        : 'SyntaxError: Illegal return statement',
+      'Uncaught SyntaxError: Illegal return statement',
       // Line increased due to TS added lines
       {
-        line: nodeSupportsEsmHooks ? 4 : 5,
+        line: 4,
       },
     ],
 
@@ -174,13 +145,7 @@ export async function upstreamTopLevelAwaitTests({
     ['s', '2'],
     [
       'for await (let i of [1,2,3]) console.log(i)',
-      [
-        'for await (let i of [1,2,3]) console.log(i)\r',
-        '1',
-        '2',
-        '3',
-        'undefined',
-      ],
+      ['for await (let i of [1,2,3]) console.log(i)\r', '1', '2', '3', 'undefined'],
     ],
 
     // issue: REPL is expecting more input to finish execution
@@ -203,55 +168,30 @@ export async function upstreamTopLevelAwaitTests({
     ],
     [
       'for (const x of [1,2,3]) {\nawait x;\n}',
-      [
-        'for (const x of [1,2,3]) {\r',
-        '... await x;\r',
-        '... }\r',
-        'undefined',
-      ],
+      ['for (const x of [1,2,3]) {\r', '... await x;\r', '... }\r', 'undefined'],
     ],
     [
       'for await (const x of [1,2,3]) {\nconsole.log(x)\n}',
-      [
-        'for await (const x of [1,2,3]) {\r',
-        '... console.log(x)\r',
-        '... }\r',
-        '1',
-        '2',
-        '3',
-        'undefined',
-      ],
+      ['for await (const x of [1,2,3]) {\r', '... console.log(x)\r', '... }\r', '1', '2', '3', 'undefined'],
     ],
     [
       'for await (const x of [1,2,3]) {\nconsole.log(x);\n}',
-      [
-        'for await (const x of [1,2,3]) {\r',
-        '... console.log(x);\r',
-        '... }\r',
-        '1',
-        '2',
-        '3',
-        'undefined',
-      ],
+      ['for await (const x of [1,2,3]) {\r', '... console.log(x);\r', '... }\r', '1', '2', '3', 'undefined'],
     ],
   ] as const;
 
-  for (const [
-    input,
-    expected = [`${input}\r`],
-    options = {} as { line?: number },
-  ] of testCases) {
+  for (const [input, expected = [`${input}\r`], options = {} as { line?: number }] of testCases) {
     const toBeRun = input.split('\n');
     const lines = await runAndWait(toBeRun);
     if (Array.isArray(expected)) {
       if (expected.length === 1) expected.push('undefined');
       if (lines[0] === input) lines.shift();
-      expect(lines).to.eqls([...expected, PROMPT]);
+      expect(lines).toEqual([...expected, PROMPT]);
     } else if ('line' in options) {
-      expect(lines[toBeRun.length + options.line!]).to.eqls(expected);
+      expect(lines[toBeRun.length + options.line!]).toEqual(expected);
     } else {
       const echoed = toBeRun.map((a, i) => `${i > 0 ? '... ' : ''}${a}\r`);
-      expect(lines).to.eqls([...echoed, expected, PROMPT]);
+      expect(lines).toEqual([...echoed, expected, PROMPT]);
     }
   }
 }

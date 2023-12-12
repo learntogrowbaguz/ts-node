@@ -19,7 +19,7 @@ export interface TSCommon {
   getPreEmitDiagnostics: typeof _ts.getPreEmitDiagnostics;
   flattenDiagnosticMessageText: typeof _ts.flattenDiagnosticMessageText;
   transpileModule: typeof _ts.transpileModule;
-  ModuleKind: typeof _ts.ModuleKind;
+  ModuleKind: TSCommon.ModuleKindEnum;
   ScriptTarget: typeof _ts.ScriptTarget;
   findConfigFile: typeof _ts.findConfigFile;
   readConfigFile: typeof _ts.readConfigFile;
@@ -32,16 +32,7 @@ export interface TSCommon {
   createModuleResolutionCache: typeof _ts.createModuleResolutionCache;
   resolveModuleName: typeof _ts.resolveModuleName;
   resolveModuleNameFromCache: typeof _ts.resolveModuleNameFromCache;
-  // Changed in TS 4.7
-  resolveTypeReferenceDirective(
-    typeReferenceDirectiveName: string,
-    containingFile: string | undefined,
-    options: _ts.CompilerOptions,
-    host: _ts.ModuleResolutionHost,
-    redirectedReference?: _ts.ResolvedProjectReference,
-    cache?: _ts.TypeReferenceDirectiveResolutionCache,
-    resolutionMode?: _ts.SourceFile['impliedNodeFormat']
-  ): _ts.ResolvedTypeReferenceDirectiveWithFailedLookupLocations;
+  resolveTypeReferenceDirective: typeof _ts.resolveTypeReferenceDirective;
   createIncrementalCompilerHost: typeof _ts.createIncrementalCompilerHost;
   createSourceFile: typeof _ts.createSourceFile;
   getDefaultLibFileName: typeof _ts.getDefaultLibFileName;
@@ -52,27 +43,26 @@ export interface TSCommon {
   ModuleResolutionKind: typeof _ts.ModuleResolutionKind;
 }
 export namespace TSCommon {
-  export interface LanguageServiceHost extends _ts.LanguageServiceHost {
-    // Modified in 4.7
-    resolveTypeReferenceDirectives?(
-      typeDirectiveNames: string[] | _ts.FileReference[],
-      containingFile: string,
-      redirectedReference: _ts.ResolvedProjectReference | undefined,
-      options: _ts.CompilerOptions,
-      containingFileMode?: _ts.SourceFile['impliedNodeFormat'] | undefined
-    ): (_ts.ResolvedTypeReferenceDirective | undefined)[];
-  }
+  export interface LanguageServiceHost extends _ts.LanguageServiceHost {}
   export type ModuleResolutionHost = _ts.ModuleResolutionHost;
   export type ParsedCommandLine = _ts.ParsedCommandLine;
   export type ResolvedModule = _ts.ResolvedModule;
-  export type ResolvedTypeReferenceDirective =
-    _ts.ResolvedTypeReferenceDirective;
+  export type ResolvedTypeReferenceDirective = _ts.ResolvedTypeReferenceDirective;
   export type CompilerOptions = _ts.CompilerOptions;
   export type ResolvedProjectReference = _ts.ResolvedProjectReference;
-  export type ResolvedModuleWithFailedLookupLocations =
-    _ts.ResolvedModuleWithFailedLookupLocations;
+  export type ResolvedModuleWithFailedLookupLocations = _ts.ResolvedModuleWithFailedLookupLocations;
   export type FileReference = _ts.FileReference;
   export type SourceFile = _ts.SourceFile;
+  // Hack until we start building against TS >= 4.7.0
+  export type ModuleKindEnum = typeof _ts.ModuleKind & {
+    Node16: typeof _ts.ModuleKind extends { Node16: any } ? typeof _ts.ModuleKind['Node16'] : 100;
+  };
+  // Can't figure out how to re-export an enum
+  // `export import ... =` complains that _ts is type-only import
+  export namespace ModuleKind {
+    export type CommonJS = _ts.ModuleKind.CommonJS;
+    export type ESNext = _ts.ModuleKind.ESNext;
+  }
 }
 
 /**
@@ -81,9 +71,7 @@ export namespace TSCommon {
  */
 export interface TSInternal {
   // https://github.com/microsoft/TypeScript/blob/4a34294908bed6701dcba2456ca7ac5eafe0ddff/src/compiler/core.ts#L1906-L1909
-  createGetCanonicalFileName(
-    useCaseSensitiveFileNames: boolean
-  ): TSInternal.GetCanonicalFileName;
+  createGetCanonicalFileName(useCaseSensitiveFileNames: boolean): TSInternal.GetCanonicalFileName;
   // https://github.com/microsoft/TypeScript/blob/c117c266e09c80e8a06b24a6e94b9d018f5fae6b/src/compiler/commandLineParser.ts#L2054
   convertToTSConfig(
     configParseResult: _ts.ParsedCommandLine,
@@ -94,10 +82,7 @@ export interface TSInternal {
   Diagnostics: {
     File_0_not_found: _ts.DiagnosticMessage;
   };
-  createCompilerDiagnostic(
-    message: _ts.DiagnosticMessage,
-    ...args: (string | number | undefined)[]
-  ): _ts.Diagnostic;
+  createCompilerDiagnostic(message: _ts.DiagnosticMessage, ...args: (string | number | undefined)[]): _ts.Diagnostic;
   nodeModuleNameResolver(
     moduleName: string,
     containingFile: string,
@@ -105,13 +90,26 @@ export interface TSInternal {
     host: _ts.ModuleResolutionHost,
     cache?: _ts.ModuleResolutionCache,
     redirectedReference?: _ts.ResolvedProjectReference,
-    lookupConfig?: boolean
+    conditionsOrIsConfigLookup?: string[] | boolean, // `conditions` parameter added in TS 5.3
+    isConfigLookup?: boolean
   ): _ts.ResolvedModuleWithFailedLookupLocations;
   // Added in TS 4.7
   getModeForFileReference?: (
     ref: _ts.FileReference | string,
     containingFileMode: _ts.SourceFile['impliedNodeFormat']
   ) => _ts.SourceFile['impliedNodeFormat'];
+  // TODO do we need these?  Which TS version adds them?
+  getPatternFromSpec(spec: string, basePath: string, usage: 'files' | 'directories' | 'exclude'): string | undefined;
+  getRegularExpressionForWildcard(
+    specs: readonly string[] | undefined,
+    basePath: string,
+    usage: 'files' | 'directories' | 'exclude'
+  ): string | undefined;
+  // Added in TS 4.7
+  getModeForResolutionAtIndex?(
+    file: TSInternal.SourceFileImportsList,
+    index: number
+  ): _ts.SourceFile['impliedNodeFormat'];
 }
 /** @internal */
 export namespace TSInternal {
@@ -121,5 +119,9 @@ export namespace TSInternal {
   export interface ConvertToTSConfigHost {
     getCurrentDirectory(): string;
     useCaseSensitiveFileNames: boolean;
+  }
+  // Note: is only a partial declaration, TS sources declare other fields
+  export interface SourceFileImportsList {
+    impliedNodeFormat?: TSCommon.SourceFile['impliedNodeFormat'];
   }
 }

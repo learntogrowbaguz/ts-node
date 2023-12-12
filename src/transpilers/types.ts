@@ -1,5 +1,5 @@
 import type * as ts from 'typescript';
-import type { Service } from '../index';
+import type { NodeModuleEmitKind, Service } from '../index';
 import type { ProjectLocalResolveHelper } from '../util';
 
 /**
@@ -16,17 +16,12 @@ export interface TranspilerModule {
  *
  * @category Transpiler
  */
-export type TranspilerFactory = (
-  options: CreateTranspilerOptions
-) => Transpiler;
+export type TranspilerFactory = (options: CreateTranspilerOptions) => Transpiler;
 /** @category Transpiler */
 export interface CreateTranspilerOptions {
   // TODO this is confusing because its only a partial Service.  Rename?
   // Careful: must avoid stripInternal breakage by guarding with Extract<>
-  service: Pick<
-    Service,
-    Extract<'config' | 'options' | 'projectLocalResolveHelper', keyof Service>
-  >;
+  service: Pick<Service, Extract<'config' | 'options' | 'projectLocalResolveHelper', keyof Service>>;
   /**
    * If `"transpiler"` option is declared in an "extends" tsconfig, this path might be different than
    * the `projectLocalResolveHelper`
@@ -34,6 +29,13 @@ export interface CreateTranspilerOptions {
    * @internal
    */
   transpilerConfigLocalResolveHelper: ProjectLocalResolveHelper;
+  /**
+   * When using `module: nodenext` or `module: node12`, there are two possible styles of emit:
+   * - CommonJS with dynamic imports preserved (not transformed into `require()` calls)
+   * - ECMAScript modules with `import foo = require()` transformed into `require = createRequire(); const foo = require()`
+   * @internal
+   */
+  nodeModuleEmitKind?: NodeModuleEmitKind;
 }
 /** @category Transpiler */
 export interface Transpiler {

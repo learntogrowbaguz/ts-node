@@ -4,18 +4,21 @@ on:
   push:
     branches:
       - docs
+permissions: {}
 jobs:
   build:
+    permissions:
+      contents: write
     name: Build & Deploy
     runs-on: ubuntu-20.04
     steps:
       # checkout code
       - uses: actions/checkout@v2
       # install node
-      - name: Use Node.js 14
-        uses: actions/setup-node@v1
+      - name: Use Node.js 18
+        uses: actions/setup-node@v3
         with:
-          node-version: 14
+          node-version: 18
       # Render typedoc
       - run: npm install && npx typedoc
       # Render docusaurus and deploy website

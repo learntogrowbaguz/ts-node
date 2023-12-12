@@ -1,27 +1,9 @@
-import {
-  register,
-  getExtensions,
-  RegisterOptions,
-  Service,
-  versionGteLt,
-} from './index';
-import {
-  parse as parseUrl,
-  format as formatUrl,
-  UrlWithStringQuery,
-  fileURLToPath,
-  pathToFileURL,
-} from 'url';
-import { extname } from 'path';
+import { register, RegisterOptions, Service } from './index';
+import { parse as parseUrl, format as formatUrl, UrlWithStringQuery, fileURLToPath, pathToFileURL } from 'url';
+import { extname, resolve as pathResolve } from 'path';
 import * as assert from 'assert';
-import { normalizeSlashes } from './util';
+import { normalizeSlashes, versionGteLt } from './util';
 import { createRequire } from 'module';
-const {
-  createResolve,
-} = require('../dist-raw/node-internal-modules-esm-resolve');
-const {
-  defaultGetFormat,
-} = require('../dist-raw/node-internal-modules-esm-get_format');
 
 // Note: On Windows, URLs look like this: file:///D:/dev/@TypeStrong/ts-node-examples/foo.ts
 
@@ -94,13 +76,7 @@ export namespace NodeLoaderHooksAPI2 {
   }
 }
 
-export type NodeLoaderHooksFormat =
-  | 'builtin'
-  | 'commonjs'
-  | 'dynamic'
-  | 'json'
-  | 'module'
-  | 'wasm';
+export type NodeLoaderHooksFormat = 'builtin' | 'commonjs' | 'dynamic' | 'json' | 'module' | 'wasm';
 
 export type NodeImportConditions = unknown;
 export interface NodeImportAssertions {
@@ -108,12 +84,7 @@ export interface NodeImportAssertions {
 }
 
 // The hooks API changed in node version X so we need to check for backwards compatibility.
-// TODO: When the new API is backported to v12, v14, update these version checks accordingly.
-const newHooksAPI =
-  versionGteLt(process.versions.node, '17.0.0') ||
-  versionGteLt(process.versions.node, '16.12.0', '17.0.0') ||
-  versionGteLt(process.versions.node, '14.999.999', '15.0.0') ||
-  versionGteLt(process.versions.node, '12.999.999', '13.0.0');
+const newHooksAPI = versionGteLt(process.versions.node, '16.12.0');
 
 /** @internal */
 export function filterHooksByAPIVersion(
@@ -136,13 +107,10 @@ export function registerAndCreateEsmHooks(opts?: RegisterOptions) {
 }
 
 export function createEsmHooks(tsNodeService: Service) {
-  tsNodeService.enableExperimentalEsmLoaderInterop();
-
   // Custom implementation that considers additional file extensions and automatically adds file extensions
-  const nodeResolveImplementation = createResolve({
-    ...getExtensions(tsNodeService.config),
-    preferTsExts: tsNodeService.options.preferTsExts,
-  });
+  const nodeResolveImplementation = tsNodeService.getNodeEsmResolver();
+  const nodeGetFormatImplementation = tsNodeService.getNodeEsmGetFormat();
+  const extensions = tsNodeService.extensions;
 
   const hooksAPI = filterHooksByAPIVersion({
     resolve,
@@ -157,12 +125,14 @@ export function createEsmHooks(tsNodeService: Service) {
     return protocol === null || protocol === 'file:';
   }
 
+  const runMainHackUrl = pathToFileURL(pathResolve(__dirname, '../dist-raw/runmain-hack.js')).toString();
+
   /**
    * Named "probably" as a reminder that this is a guess.
    * node does not explicitly tell us if we're resolving the entrypoint or not.
    */
   function isProbablyEntrypoint(specifier: string, parentURL: string) {
-    return parentURL === undefined && specifier.startsWith('file://');
+    return (parentURL === undefined || parentURL === runMainHackUrl) && specifier.startsWith('file://');
   }
   // Side-channel between `resolve()` and `load()` hooks
   const rememberIsProbablyEntrypoint = new Set();
@@ -180,29 +150,22 @@ export function createEsmHooks(tsNodeService: Service) {
     // See: https://github.com/nodejs/node/discussions/41711
     // nodejs will likely implement a similar fallback.  Till then, we can do our users a favor and fallback today.
     async function entrypointFallback(
-      cb: () => ReturnType<typeof resolve>
+      cb: () => ReturnType<typeof resolve> | Awaited<ReturnType<typeof resolve>>
     ): ReturnType<typeof resolve> {
       try {
         const resolution = await cb();
-        if (
-          resolution?.url &&
-          isProbablyEntrypoint(specifier, context.parentURL)
-        )
+        if (resolution?.url && isProbablyEntrypoint(specifier, context.parentURL))
           rememberIsProbablyEntrypoint.add(resolution.url);
         return resolution;
       } catch (esmResolverError) {
-        if (!isProbablyEntrypoint(specifier, context.parentURL))
-          throw esmResolverError;
+        if (!isProbablyEntrypoint(specifier, context.parentURL)) throw esmResolverError;
         try {
           let cjsSpecifier = specifier;
           // Attempt to convert from ESM file:// to CommonJS path
           try {
-            if (specifier.startsWith('file://'))
-              cjsSpecifier = fileURLToPath(specifier);
+            if (specifier.startsWith('file://')) cjsSpecifier = fileURLToPath(specifier);
           } catch {}
-          const resolution = pathToFileURL(
-            createRequire(process.cwd()).resolve(cjsSpecifier)
-          ).toString();
+          const resolution = pathToFileURL(createRequire(process.cwd()).resolve(cjsSpecifier)).toString();
           rememberIsProbablyEntrypoint.add(resolution);
           rememberResolvedViaCommonjsFallback.add(resolution);
           return { url: resolution, format: 'commonjs' };
@@ -232,13 +195,7 @@ export function createEsmHooks(tsNodeService: Service) {
 
       // pathname is the path to be resolved
 
-      return entrypointFallback(() =>
-        nodeResolveImplementation.defaultResolve(
-          specifier,
-          context,
-          defaultResolve
-        )
-      );
+      return entrypointFallback(() => nodeResolveImplementation.defaultResolve(specifier, context, defaultResolve));
     });
   }
 
@@ -258,8 +215,7 @@ export function createEsmHooks(tsNodeService: Service) {
       // If we get a format hint from resolve() on the context then use it
       // otherwise call the old getFormat() hook using node's old built-in defaultGetFormat() that ships with ts-node
       const format =
-        context.format ??
-        (await getFormat(url, context, defaultGetFormat)).format;
+        context.format ?? (await getFormat(url, context, nodeGetFormatImplementation.defaultGetFormat)).format;
 
       let source = undefined;
       if (format !== 'builtin' && format !== 'commonjs') {
@@ -274,24 +230,16 @@ export function createEsmHooks(tsNodeService: Service) {
         );
 
         if (rawSource === undefined || rawSource === null) {
-          throw new Error(
-            `Failed to load raw source: Format was '${format}' and url was '${url}''.`
-          );
+          throw new Error(`Failed to load raw source: Format was '${format}' and url was '${url}''.`);
         }
 
         // Emulate node's built-in old defaultTransformSource() so we can re-use the old transformSource() hook
-        const defaultTransformSource: typeof transformSource = async (
+        const defaultTransformSource: typeof transformSource = async (source, _context, _defaultTransformSource) => ({
           source,
-          _context,
-          _defaultTransformSource
-        ) => ({ source });
+        });
 
         // Call the old hook
-        const { source: transformedSource } = await transformSource(
-          rawSource,
-          { url, format },
-          defaultTransformSource
-        );
+        const { source: transformedSource } = await transformSource(rawSource, { url, format }, defaultTransformSource);
         source = transformedSource;
       }
 
@@ -304,14 +252,11 @@ export function createEsmHooks(tsNodeService: Service) {
     context: {},
     defaultGetFormat: typeof getFormat
   ): Promise<{ format: NodeLoaderHooksFormat }> {
-    const defer = (overrideUrl: string = url) =>
-      defaultGetFormat(overrideUrl, context, defaultGetFormat);
+    const defer = (overrideUrl: string = url) => defaultGetFormat(overrideUrl, context, defaultGetFormat);
 
     // See: https://github.com/nodejs/node/discussions/41711
     // nodejs will likely implement a similar fallback.  Till then, we can do our users a favor and fallback today.
-    async function entrypointFallback(
-      cb: () => ReturnType<typeof getFormat>
-    ): ReturnType<typeof getFormat> {
+    async function entrypointFallback(cb: () => ReturnType<typeof getFormat>): ReturnType<typeof getFormat> {
       try {
         return await cb();
       } catch (getFormatError) {
@@ -327,29 +272,37 @@ export function createEsmHooks(tsNodeService: Service) {
     }
 
     const { pathname } = parsed;
-    assert(
-      pathname !== null,
-      'ESM getFormat() hook: URL should never have null pathname'
-    );
+    assert(pathname !== null, 'ESM getFormat() hook: URL should never have null pathname');
 
     const nativePath = fileURLToPath(url);
 
-    // If file has .ts, .tsx, or .jsx extension, then ask node how it would treat this file if it were .js
-    const ext = extname(nativePath);
     let nodeSays: { format: NodeLoaderHooksFormat };
-    if (ext !== '.js' && !tsNodeService.ignored(nativePath)) {
-      nodeSays = await entrypointFallback(() =>
-        defer(formatUrl(pathToFileURL(nativePath + '.js')))
-      );
+
+    // If file has extension not understood by node, then ask node how it would treat the emitted extension.
+    // E.g. .mts compiles to .mjs, so ask node how to classify an .mjs file.
+    const ext = extname(nativePath);
+    const tsNodeIgnored = tsNodeService.ignored(nativePath);
+    const nodeEquivalentExt = extensions.nodeEquivalents.get(ext);
+    if (nodeEquivalentExt && !tsNodeIgnored) {
+      nodeSays = await entrypointFallback(() => defer(formatUrl(pathToFileURL(nativePath + nodeEquivalentExt))));
     } else {
-      nodeSays = await entrypointFallback(defer);
+      try {
+        nodeSays = await entrypointFallback(defer);
+      } catch (e) {
+        if (e instanceof Error && tsNodeIgnored && extensions.nodeDoesNotUnderstand.includes(ext)) {
+          e.message +=
+            `\n\n` +
+            `Hint:\n` +
+            `ts-node is configured to ignore this file.\n` +
+            `If you want ts-node to handle this file, consider enabling the "skipIgnore" option or adjusting your "ignore" patterns.\n` +
+            `https://typestrong.org/ts-node/docs/scope\n`;
+        }
+        throw e;
+      }
     }
     // For files compiled by ts-node that node believes are either CJS or ESM, check if we should override that classification
-    if (
-      !tsNodeService.ignored(nativePath) &&
-      (nodeSays.format === 'commonjs' || nodeSays.format === 'module')
-    ) {
-      const { moduleType } = tsNodeService.moduleTypeClassifier.classifyModule(
+    if (!tsNodeService.ignored(nativePath) && (nodeSays.format === 'commonjs' || nodeSays.format === 'module')) {
+      const { moduleType } = tsNodeService.moduleTypeClassifier.classifyModuleByModuleTypeOverrides(
         normalizeSlashes(nativePath)
       );
       if (moduleType === 'cjs') {
@@ -370,11 +323,9 @@ export function createEsmHooks(tsNodeService: Service) {
       throw new Error('No source');
     }
 
-    const defer = () =>
-      defaultTransformSource(source, context, defaultTransformSource);
+    const defer = () => defaultTransformSource(source, context, defaultTransformSource);
 
-    const sourceAsString =
-      typeof source === 'string' ? source : source.toString('utf8');
+    const sourceAsString = typeof source === 'string' ? source : source.toString('utf8');
 
     const { url } = context;
     const parsed = parseUrl(url);

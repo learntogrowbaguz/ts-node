@@ -1,50 +1,45 @@
-import { dirname } from 'path';
+import type { ModuleTypeOverride, ModuleTypes } from '.';
 import { getPatternFromSpec } from './ts-internals';
 import { cachedLookup, normalizeSlashes } from './util';
 
-// Logic to support out `moduleTypes` option, which allows overriding node's default ESM / CJS
+// Logic to support our `moduleTypes` option, which allows overriding node's default ESM / CJS
 // classification of `.js` files based on package.json `type` field.
 
-/** @internal */
-export type ModuleType = 'cjs' | 'esm' | 'package';
+/**
+ * Seperate internal type because `auto` is clearer than `package`, but changing
+ * the public API is a breaking change.
+ * @internal
+ */
+export type InternalModuleTypeOverride = 'cjs' | 'esm' | 'auto';
 /** @internal */
 export interface ModuleTypeClassification {
-  moduleType: ModuleType;
+  moduleType: InternalModuleTypeOverride;
 }
 /** @internal */
 export interface ModuleTypeClassifierOptions {
   basePath?: string;
-  patterns?: Record<string, ModuleType>;
+  patterns?: ModuleTypes;
 }
 /** @internal */
-export type ModuleTypeClassifier = ReturnType<
-  typeof createModuleTypeClassifier
->;
+export type ModuleTypeClassifier = ReturnType<typeof createModuleTypeClassifier>;
 /**
  * @internal
  * May receive non-normalized options -- basePath and patterns -- and will normalize them
  * internally.
  * However, calls to `classifyModule` must pass pre-normalized paths!
  */
-export function createModuleTypeClassifier(
-  options: ModuleTypeClassifierOptions
-) {
+export function createModuleTypeClassifier(options: ModuleTypeClassifierOptions) {
   const { patterns, basePath: _basePath } = options;
-  const basePath =
-    _basePath !== undefined
-      ? normalizeSlashes(_basePath).replace(/\/$/, '')
-      : undefined;
+  const basePath = _basePath !== undefined ? normalizeSlashes(_basePath).replace(/\/$/, '') : undefined;
 
-  const patternTypePairs = Object.entries(patterns ?? []).map(
-    ([_pattern, type]) => {
-      const pattern = normalizeSlashes(_pattern);
-      return { pattern: parsePattern(basePath!, pattern), type };
-    }
-  );
+  const patternTypePairs = Object.entries(patterns ?? []).map(([_pattern, type]) => {
+    const pattern = normalizeSlashes(_pattern);
+    return { pattern: parsePattern(basePath!, pattern), type };
+  });
 
-  const classifications: Record<ModuleType, ModuleTypeClassification> = {
+  const classifications: Record<ModuleTypeOverride, ModuleTypeClassification> = {
     package: {
-      moduleType: 'package',
+      moduleType: 'auto',
     },
     cjs: {
       moduleType: 'cjs',
@@ -69,9 +64,7 @@ export function createModuleTypeClassifier(
   }
 
   return {
-    classifyModule: patternTypePairs.length
-      ? classifyModule
-      : classifyModuleAuto,
+    classifyModuleByModuleTypeOverrides: patternTypePairs.length ? classifyModule : classifyModuleAuto,
   };
 }
 
@@ -80,11 +73,7 @@ function parsePattern(basePath: string, patternString: string): RegExp {
   return pattern !== undefined ? new RegExp(pattern) : /(?:)/;
 }
 
-function matchPatterns<T>(
-  objects: T[],
-  getPattern: (t: T) => RegExp,
-  candidate: string
-): T | undefined {
+function matchPatterns<T>(objects: T[], getPattern: (t: T) => RegExp, candidate: string): T | undefined {
   for (let i = objects.length - 1; i >= 0; i--) {
     const object = objects[i];
     const pattern = getPattern(object);

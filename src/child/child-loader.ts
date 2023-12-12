@@ -1,16 +1,10 @@
-// TODO same version check as ESM loader, but export stubs
-// Also export a binder function that allows re-binding where the stubs
-// delegate.
-
 import type { NodeLoaderHooksAPI1, NodeLoaderHooksAPI2 } from '..';
 import { filterHooksByAPIVersion } from '../esm';
 
 let hooks: NodeLoaderHooksAPI1 & NodeLoaderHooksAPI2;
 
 /** @internal */
-export function lateBindHooks(
-  _hooks: NodeLoaderHooksAPI1 | NodeLoaderHooksAPI2
-) {
+export function lateBindHooks(_hooks: NodeLoaderHooksAPI1 | NodeLoaderHooksAPI2) {
   hooks = _hooks as NodeLoaderHooksAPI1 & NodeLoaderHooksAPI2;
 }
 
@@ -30,5 +24,5 @@ const proxy: NodeLoaderHooksAPI1 & NodeLoaderHooksAPI2 = {
 };
 
 /** @internal */
-export const { resolve, load, getFormat, transformSource } =
-  filterHooksByAPIVersion(proxy) as NodeLoaderHooksAPI1 & NodeLoaderHooksAPI2;
+export const { resolve, load, getFormat, transformSource } = filterHooksByAPIVersion(proxy) as NodeLoaderHooksAPI1 &
+  NodeLoaderHooksAPI2;

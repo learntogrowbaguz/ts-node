@@ -1,11 +1,45 @@
-const {ArrayPrototypeForEach, StringPrototypeStartsWith, ObjectPrototypeHasOwnProperty, StringPrototypeIncludes, ObjectDefineProperty} = require('./node-primordials');
+// Copied from https://github.com/nodejs/node/blob/v17.0.1/lib/internal/modules/cjs/helpers.js
 
-exports.addBuiltinLibsToObject = addBuiltinLibsToObject;
+'use strict';
 
-// Copied from https://github.com/nodejs/node/blob/21f5a56914a3b24ad77535ef369b93c6b1c11d18/lib/internal/modules/cjs/helpers.js#L133-L178
-function addBuiltinLibsToObject(object) {
+const {
+  ArrayPrototypeForEach,
+  ObjectDefineProperty,
+  ObjectPrototypeHasOwnProperty,
+  SafeSet,
+  StringPrototypeIncludes,
+  StringPrototypeStartsWith,
+} = require('./node-primordials');
+
+const { getOptionValue } = require('./node-options');
+const userConditions = getOptionValue('--conditions');
+
+const noAddons = getOptionValue('--no-addons');
+const addonConditions = noAddons ? [] : ['node-addons'];
+
+// TODO: Use this set when resolving pkg#exports conditions in loader.js.
+const cjsConditions = new SafeSet([
+  'require',
+  'node',
+  ...addonConditions,
+  ...userConditions,
+]);
+
+/**
+ * @param {any} object
+ * @param {string} [dummyModuleName]
+ * @return {void}
+ */
+function addBuiltinLibsToObject(object, dummyModuleName) {
   // Make built-in modules available directly (loaded lazily).
-  const { builtinModules } = require('module').Module;
+  const Module = require('module').Module;
+  const { builtinModules } = Module;
+
+  // To require built-in modules in user-land and ignore modules whose
+  // `canBeRequiredByUsers` is false. So we create a dummy module object and not
+  // use `require()` directly.
+  const dummyModule = new Module(dummyModuleName);
+
   ArrayPrototypeForEach(builtinModules, (name) => {
     // Neither add underscored modules, nor ones that contain slashes (e.g.,
     // 'fs/promises') or ones that are already defined.
@@ -29,7 +63,7 @@ function addBuiltinLibsToObject(object) {
 
     ObjectDefineProperty(object, name, {
       get: () => {
-        const lib = require(name);
+        const lib = dummyModule.require(name);
 
         // Disable the current getter/setter and set up a new
         // non-enumerable property.
@@ -49,3 +83,6 @@ function addBuiltinLibsToObject(object) {
     });
   });
 }
+
+exports.addBuiltinLibsToObject = addBuiltinLibsToObject;
+exports.cjsConditions = cjsConditions;

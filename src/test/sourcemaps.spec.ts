@@ -1,12 +1,7 @@
 import * as expect from 'expect';
-import { createExec, createExecTester } from './exec-helpers';
-import {
-  CMD_TS_NODE_WITH_PROJECT_FLAG,
-  contextTsNodeUnderTest,
-  TEST_DIR,
-} from './helpers';
-import { test as _test } from './testlib';
-const test = _test.context(contextTsNodeUnderTest);
+import { createExec, createExecTester, CMD_TS_NODE_WITH_PROJECT_FLAG, ctxTsNode, TEST_DIR } from './helpers';
+import { context } from './testlib';
+const test = context(ctxTsNode);
 
 const exec = createExecTester({
   cmd: CMD_TS_NODE_WITH_PROJECT_FLAG,
@@ -16,10 +11,11 @@ const exec = createExecTester({
 });
 
 test('Redirects source-map-support to @cspotcode/source-map-support so that third-party libraries get correct source-mapped locations', async () => {
-  const { stdout } = await exec({
+  const r = await exec({
     flags: `./legacy-source-map-support-interop/index.ts`,
   });
-  expect(stdout.split('\n')).toMatchObject([
+  expect(r.err).toBeNull();
+  expect(r.stdout.split('\n')).toMatchObject([
     expect.stringContaining('.ts:2 '),
     'true',
     'true',
